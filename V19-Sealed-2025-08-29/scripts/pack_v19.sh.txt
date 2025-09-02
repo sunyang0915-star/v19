@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+DATE=$(date +%Y%m%d)
+BUNDLE="V19-Sealed-${DATE}"
+mkdir -p dist
+tar -czf "dist/${BUNDLE}.tar.gz" docs/V19 schemas configs/env.v19.example tests/acceptance
+sha256sum "dist/${BUNDLE}.tar.gz" > "dist/${BUNDLE}.sha256"
+echo "Wrote dist/${BUNDLE}.tar.gz and .sha256"

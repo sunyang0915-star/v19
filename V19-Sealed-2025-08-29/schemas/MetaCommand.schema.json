@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MetaCommand",
+  "type": "object",
+  "properties": {
+    "meta_context": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["role_play_and_analyze","resource_sim","policy_override"] },
+        "role": { "type": "string" },
+        "objective": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["type"]
+    },
+    "task_payload": { "type": "string" }
+  },
+  "required": ["meta_context","task_payload"],
+  "additionalProperties": false
+}

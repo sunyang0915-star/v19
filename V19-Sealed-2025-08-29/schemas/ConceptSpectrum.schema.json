@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConceptSpectrum",
+  "type": "object",
+  "properties": {
+    "concept": { "type": "string" },
+    "dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name","unit","anchors"],
+        "properties": {
+          "name": { "type": "string" },
+          "unit": { "type": "string" },
+          "anchors": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "object", "properties": { "value": { "type": "number" }, "label": { "type": "string" } }, "required": ["value","label"], "additionalProperties": false }
+          },
+          "kde": { "type": "boolean" },
+          "thresholds": { "type": "object", "additionalProperties": { "type": "number" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "default_policy": {
+      "type": "object",
+      "properties": {
+        "clarify_gap_pct": { "type": "number" },
+        "accept_min_conf": { "type": "number" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["concept","dimensions"],
+  "additionalProperties": false
+}

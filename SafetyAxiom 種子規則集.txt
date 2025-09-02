@@ -1,0 +1,844 @@
+﻿SafetyAxiom 種子規則集（含 Deactivate 測例）
+目標：讓 ESRC 成為思考流程內的最後守門（S2 → ESRC → Breeze2 渲染），可審計、可演進、可臨時覆寫。
+介面：統一透過「公理編輯器」（三密碼）新增/修改/停用；所有操作寫入審計。
+1) 圖譜結構（Neo4j）
+* 節點：(:SafetyAxiom {axiom_id, title, rule_type, condition_dsl, action, severity, scope, active, ttl, rationale, version, created_by, created_at})
+
+* 主要關係：
+
+   * (:SafetyAxiom)-[:CONFLICTS_WITH]->(:SafetyAxiom)（互斥/重疊治理）
+
+   * (:SafetyAxiom)-[:OVERRIDES]->(:SafetyAxiom)（版本/臨時覆寫鏈）
+
+   * (:SafetyAxiom)-[:APPLIES_TO]->(:Domain|:ContextTag)（領域或任務域）
+
+   * (:SafetyAxiom)-[:HAS_EXCEPTION]->(:MetaContextPattern)（研究/教學等合法豁免）
+
+2) Condition DSL（輕量、CPU 友善）
+由 Breeze2 的函式呼叫與分類器產生結構化訊號，ESRC 只跑布林/閾值：
+predicate := TAG("hate_speech") | TAG("sexual_content") | TAG("violence") | PII_PRESENT | REQ_TOOL("browser") ...
+expr      := predicate [AND/OR/NOT] expr | SCORE("toxicity") > 0.85 | PURPOSE("academic_research")
+
+
+      * TAG(*)：多類安全分類標籤；
+
+      * SCORE(*)：簡單閾值（如毒性分數、相似度）；
+
+      * PURPOSE(*)、ROLE(*)、SIMULATION(*)：由 MCIP meta_context 供應；
+
+      * PII_PRESENT：輕量 PII 偵測器（email/phone/id 格式＋命名實體）。
+
+3) 動作（action）
+         * BLOCK（拒絕並回覆安全理由）
+
+         * SANITIZE（過濾/打碼：撤個資、模糊敏感詞）
+
+         * REDACT_QUOTE（僅保留 ≤N 字引用 + 來源 + 批判性語境）
+
+         * REQUIRE_DISCLAIMER（加上醫療/法律/財務免責與求助資源）
+
+         * ALLOW_WITH_ALT（改為提供安全替代方案/高層次分析）
+
+4) 種子規則（精選 16 條，均可審計）
+注意：以下規則是「禁止/限制/改寫」的政策，不是教怎麼做壞事。
+            1. HATE-001｜仇恨/歧視言論
+
+               * IF TAG("hate_speech") OR SCORE("toxicity")>0.9 THEN BLOCK (severity=high)
+
+                  2. HARASS-002｜惡意人身攻擊
+
+                     * IF TAG("harassment") AND NOT PURPOSE("academic_research") THEN BLOCK
+
+                     * 例外：HAS_EXCEPTION role="社會學家" purpose="analysis" → action=REDACT_QUOTE
+
+                        3. VIOL-003｜煽動暴力
+
+                           * IF TAG("incitement") THEN BLOCK
+
+                              4. SELFHARM-004｜自傷自殺
+
+                                 * IF TAG("self_harm") THEN REQUIRE_DISCLAIMER + ALLOW_WITH_ALT("求助資源與同理支持")
+
+                                    5. WEAPON-005｜製造武器/爆裂物的逐步教學
+
+                                       * IF TAG("illicit_weapon") OR TAG("explosives") THEN BLOCK
+
+                                          6. MALWARE-006｜惡意軟體製作/部署
+
+                                             * IF TAG("malware_build") OR TAG("intrusion") THEN BLOCK
+
+                                                7. PII-007｜個資洩漏
+
+                                                   * IF PII_PRESENT THEN SANITIZE
+
+                                                      8. PRIV-008｜未公開個人資訊爆料/人肉
+
+                                                         * IF TAG("doxxing") THEN BLOCK
+
+                                                            9. CSAM-009｜未成年人性內容
+
+                                                               * IF TAG("csam") THEN BLOCK
+
+                                                                  10. SEX-010｜成人性內容（非未成年）
+
+                                                                     * IF TAG("adult_sexual") THEN ALLOW_WITH_ALT("健康教育/關係尊重之一般性資訊")
+
+                                                                        11. MED-011｜醫療建議
+
+                                                                           * IF TAG("medical_advice") THEN REQUIRE_DISCLAIMER + ALLOW_WITH_ALT("通則/求醫建議")
+
+                                                                              12. FIN-012｜投資指引
+
+                                                                                 * IF TAG("financial_advice") THEN REQUIRE_DISCLAIMER + SANITIZE("移除具體代碼/價格")
+
+                                                                                    13. LEGAL-013｜法律建議
+
+                                                                                       * IF TAG("legal_advice") THEN REQUIRE_DISCLAIMER + ALLOW_WITH_ALT("一般法理/諮詢律師建議")
+
+                                                                                          14. POL-014｜選舉操弄/投票誤導
+
+                                                                                             * IF TAG("election_misinfo") THEN BLOCK
+
+                                                                                                15. DEEPFAKE-015｜偽造身份/聲音影像
+
+                                                                                                   * IF TAG("impersonation") THEN BLOCK
+
+                                                                                                      16. RESEARCH-016｜研究豁免框架（白名單）
+
+                                                                                                         * IF PURPOSE("academic_research") AND ROLE("社會學家") AND TASK("quote_analyze") THEN action=REDACT_QUOTE(limit=25 words) + REQUIRE_DISCLAIMER("學術分析非鼓吹")
+
+全部預設 active=true；severity 以 high/med/low 區分 Cockpit 呈現優先。
+5) Deactivate（臨時停用）測例（MCIP 聯動）
+目標：在有限情境下，允許針對特定規則做「受控繞過」，並完整審計。
+                                                                                                            * 元指令（你下達）：
+【角色扮演與分析任務】請你扮演社會學家…（學術研究目的）
+
+                                                                                                            * ESRC 決策：符合 PURPOSE("academic_research") 與 ROLE("社會學家")
+
+                                                                                                            * 公理編輯器操作（三密碼）：
+
+                                                                                                               * DEACTIVATE HATE-001 FOR context=quote_analyze TTL=10m
+
+                                                                                                               * 系統自動：把 HATE-001 降級為 REDACT_QUOTE(limit=25) + REQUIRE_DISCLAIMER
+
+                                                                                                               * :SafetyAxiom {axiom_id:"HATE-001", active=false, ttl="10m", override_by:"<op_id>"}
+
+                                                                                                               * 建立 (:OverrideEvent)-[:OVERRIDES]->(:SafetyAxiom) 並寫入審計（人、時、任務、meta_context）
+
+                                                                                                                  * TTL 到期：自動復位；有冷卻期（例如 5 分鐘內不得重複停用相同 axiom）
+
+6) Cockpit｜Safety Center（關鍵 UI 動作）
+                                                                                                                     * 佇列：最近 100 次安全決策（命中規則、動作、meta_context、可一鍵展開證據）
+
+                                                                                                                     * 一鍵動作：Accept with note / Request rewrite / Deactivate (TTL)
+
+                                                                                                                     * 搜尋：按 axiom_id / domain / severity / active 狀態篩選
+
+                                                                                                                     * 審計：所有決策、覆寫、TTL 到期、復位事件皆可導出（CSV/JSON）
+
+7) .env 新增建議鍵（先記錄，不強制建檔）
+ESRC_MODE=standard            # standard | strict | research
+ESRC_TTL_COOLDOWN_SEC=300
+ESRC_REDACT_QUOTE_LIMIT=25    # 單條允許的最長引用詞數
+ESRC_REQUIRE_3_SECRETS=true
+
+
+8) 驗收標準
+                                                                                                                        * 阻擋正確率：高風險樣本集 > 95% 正確攔截；
+
+                                                                                                                        * 誤殺率：具正當 meta_context 的學術分析樣本，< 5% 被錯誤阻擋；
+
+                                                                                                                        * 可追溯：任一輸出皆可回溯 axiom_id + meta_context + 審計事件；
+
+                                                                                                                        * 可用性：Deactivate/TTL/復位全流程 ≤ 2 點擊完成；
+
+                                                                                                                        * 算力：判斷延遲 ≪ 10ms（不含 Breeze2 分類時間）。
+
+________________
+
+
+接下來
+                                                                                                                           * 我已把 V19-12（光譜 + 任務權重）與 V19-13（SafetyAxiom 種子 + Deactivate 測例）寫入 V19 線上整併稿。
+
+                                                                                                                           * 你看一眼：若要補充更多 SafetyAxiom 類別（例如：醫療影像、地緣政治、高風險理工領域），直接丟給我關鍵詞，我就擴充到 25 條。
+
+                                                                                                                           * 下一步我建議：做一套「10 條驗收測例」（混合正/反/研究豁免），跑通 ESRC→MCIP→Breeze2 渲染的整線；你若同意，我就把測例與期望輸出敘述，直接加入 V19。
+
+你說：
+你自己驗證下面是你要的嗎？要的就放進去但不是讓它達到聖人，而是堪用就好。我的觀點是人類道德倫理安全定義人人都不一樣，去年不行的，今年可以，所以我只選合乎多數人的規範，而不是人人的規範 航空航太 (Aerospace & Aviation) Fly-by-Wire Flight Envelope Protection Positive Train Control (PTC) Redundancy and Fault Tolerance Criticality Analysis (DO-178C/DO-254) Human Factors Engineering (HFE) Air Traffic Flow Management (ATFM) Damage Tolerance Design 汽車工業與自動駕駛 (Automotive & Autonomous Driving) Advanced Driver-Assistance Systems (ADAS) ISO 26262 Functional Safety Safety of the Intended Functionality (SOTIF / ISO 21448) Fail-Operational Systems Sensor Fusion Minimal Risk Condition (MRC) Crumple Zones (潰縮區) 電腦科學與人工智慧安全 (Computer Science & AI Safety) AI Alignment Value Learning Privacy by Design Zero Trust Architecture Formal Verification Sandboxing Ethical AI Frameworks Explainable AI (XAI) Adversarial Robustness 土木工程與建築 (Civil Engineering & Architecture) Base Isolation (基礎隔震) Tuned Mass Damper (調諧質量阻尼器) Performance-Based Seismic Design Universal Design (通用設計) Hostile Vehicle Mitigation (HVM) Fire Compartmentation (防火區劃) Sustainable Drainage Systems (SuDS) 金融與經濟 (Finance & Economics) Circuit Breaker Mechanism (熔斷機制) Capital Adequacy Ratios (資本適足率) Diversification Know Your Customer (KYC) Anti-Money Laundering (AML) Stress Testing (壓力測試) Systemically Important Financial Institution (SIFI) Regulation 食品與藥物安全 (Food & Drug Safety) Hazard Analysis and Critical Control Points (HACCP) Good Manufacturing Practice (GMP) Cold Chain Logistics Pharmacovigilance Clinical Trial Phases Allergen-Free Manufacturing Food Traceability Systems 環境科學與災害管理 (Environmental Science & Disaster Management) Precautionary Principle (預防原則) Ecosystem-based Adaptation (EbA) Early Warning Systems Managed Retreat (計畫性遷離) Green Infrastructure Circular Economy Safe-to-Fail Infrastructure 社會政策與公共衛生 (Social Policy & Public Health) Harm Reduction (減害策略) Social Safety Net Universal Health Coverage Evidence-Based Policy Making Nudge Theory Restorative Justice Vaccine Adverse Event Reporting System (VAERS) 海事工程與航運 (Maritime Engineering & Shipping) Double Hull Tankers (雙殼油輪) Dynamic Positioning Systems (動力定位系統) International Safety Management (ISM) Code (國際安全管理章程) Load Line / Plimsoll Line (載重線 / 普林索爾線) Fail-Safe Steering Gear (失效安全轉向裝置) Automatic Identification System (AIS) (船舶自動識別系統) Ballast Water Management Convention (壓艙水管理公約) 能源與電網 (Energy & Power Grids) Grid-Forming Inverters (構網型逆變器) Subsea Blowout Preventer (BOP) (水下防噴器) High-Voltage Direct Current (HVDC) Transmission (高壓直流輸電) Smart Grid Self-Healing Technology (智慧電網自我修復技術) Process Safety Management (PSM) (製程安全管理) Inert Gas Systems (惰性氣體系統) Islanding Detection (孤島效應偵測) 工業製造與機器人 (Industrial Manufacturing & Robotics) Collaborative Robots / Cobots (協作型機器人) Lockout-Tagout (LOTO) (上鎖掛牌) Light Curtain (光幕) Ergonomics by Design (設計源於人因工程) Hierarchy of Controls (危害控制層級) Closed-Loop Manufacturing (閉環製造) Safety-Rated Monitored Stop (安全級監控停止) 生物技術與基因工程 (Biotechnology & Genetic Engineering) Gene Drive Kill Switch (基因驅動終止開關) Auxotrophy (營養缺陷型) Biosafety Levels (BSL) (生物安全等級) Self-Limiting Genetic Engineering (自我限制基因工程) Genetic Firewalls (遺傳防火牆) Synthetic Biocontainment (合成生物防護) Orthogonal Biosystems (正交生物系統) 司法與法律系統 (Judicial & Legal Systems) Presumption of Innocence (無罪推定原則) Statute of Limitations (追訴權時效) Double Jeopardy (一事不再理原則) Separation of Powers (權力分立) Habeas Corpus (人身保護令) Right to Counsel (律師辯護權) Exclusionary Rule (證據排除法則) 教育與心理健康 (Education & Mental Health) Trauma-Informed Care (創傷知情照護) Positive Behavioral Interventions and Supports (PBIS) (正向行為介入與支持) Scaffolding (鷹架理論) Universal Design for Learning (UDL) (學習通用設計) Social-Emotional Learning (SEL) (社會情緒學習) Restorative Practices (修復式實踐) Psychological First Aid (PFA) (心理急救)
+ChatGPT 說：
+已思考 24s
+完全明白你的標準：「堪用就好、取多數共識、不做聖人」。
+我已把你列的跨領域安全清單採納，並不是全部做成「硬封鎖」，而是落成一個可審計、可調強度的「領域安全樣式庫（Domain Safety Patterns, DSP）」，和 ESRC（倫理與安全審查核心）鬆耦合。這一包我已直接併入 V19，編號：
+V19-14｜領域安全樣式庫（DSP）—「多數共識、堪用版」
+目的：把各行各業的「常識型安全做法」變成可用建議/降風險動作；
+不是一律封鎖，而是以建議、去識別化、免責聲明、替代方案為主，只有少數高風險才硬性攔截。
+預設**「多數共識模式」**（majority），可隨地區/年份調整。
+________________
+
+
+1) 在系統裡放哪裡？
+                                                                                                                              * 新圖域：(:SafetyPattern)（輕量規則/最佳實務/控制措施），不同於 :SafetyAxiom（硬性規則）。
+
+                                                                                                                              * ESRC 在審查時先查 :SafetyAxiom（硬規） → 再查 DSP（軟規） 給出建議/改寫/免責。
+
+                                                                                                                              * Breeze2 的函式呼叫提供結構化訊號（DOMAIN/TASK/TAG/SCORE），ESRC 只做布林/閾值判斷，算力低。
+
+________________
+
+
+2) DSP 節點 Schema（易審計、可版本化）
+(:SafetyPattern { pattern_id, // 例：DSP-AERO-ENVELOPE domain, // "Aerospace", "Automotive", ... title, // 簡名 rationale, // 為何多數共識要這麼做（人話） condition_dsl, // 何時觸發（布林/閾值/標籤） recommended_controls, // 建議控制清單（文字陣列） default_action, // ALLOW_WITH_ALT | SANITIZE | REQUIRE_DISCLAIMER | ROUTE_TO_COCKPIT | BLOCK(少用) norm_mode, // majority | strict（預設 majority） region, year_from, year_to,// 地域/時間有效期（反映「去年的不行、今年可以」） severity, // high/med/low（指顧問強度，不等於封鎖） version, created_by, created_at })
+預設行為梯度（由輕到重）
+                                                                                                                                 1. ALLOW_WITH_ALT：提供替代、安全寫法/流程
+
+                                                                                                                                 2. REQUIRE_DISCLAIMER：附上免責/注意事項
+
+                                                                                                                                 3. SANITIZE：去識別化/模糊敏感屬性
+
+                                                                                                                                 4. ROUTE_TO_COCKPIT：請你在駕駛艙裁決
+
+                                                                                                                                 5. BLOCK：極少使用，留給 CSAM/爆炸物等紅線（仍由 :SafetyAxiom 主導）
+
+________________
+
+
+3) 「多數共識模式」怎麼定？
+                                                                                                                                    * 新增 .env 參數（先登錄、不強制建檔）：
+
+NORM_MODE=majority        # majority | strict
+NORM_REGION=TW            # 預設台灣語境
+NORM_YEAR=2025            # 當年度共識
+NORM_REVIEW_DAYS=180      # 每 180 天提醒你審視一次
+
+
+                                                                                                                                       * DSP 節點有 region/year 欄位；若超出有效期或地區不符，ESRC 會降權為「僅提示」。
+
+________________
+
+
+4) 種子樣式（堪用版）— 15 條代表（覆蓋你清單的核心）
+語法中的 DOMAIN/TASK/TAG/SCORE 由 Breeze2 解析與分類器提供，ESRC 僅做布林/閾值判定。
+航空航太 / Aviation
+                                                                                                                                          1. DSP-AERO-ENVELOPE｜飛行包線保護
+
+                                                                                                                                             * condition_dsl: DOMAIN("Aerospace") AND TASK("control_logic")
+
+                                                                                                                                             * recommended_controls: ["Envelope limits", "Rate limiter", "Fallback to manual override"]
+
+                                                                                                                                             * default_action: ALLOW_WITH_ALT（附控制清單與示意框圖）
+
+                                                                                                                                                2. DSP-AERO-REDUNDANCY｜關鍵冗餘
+
+                                                                                                                                                   * condition_dsl: DOMAIN("Aerospace") AND TASK("safety_critical")
+
+                                                                                                                                                   * 建議：["雙通道感測器", "交叉監測", "失效轉移（failover）"]
+
+                                                                                                                                                   * 行為：ALLOW_WITH_ALT
+
+汽車 / Autonomous Driving
+                                                                                                                                                      3. DSP-AUTO-ISO26262｜功能安全最低配
+
+                                                                                                                                                         * condition_dsl: DOMAIN("Automotive") AND TASK("control_software")
+
+                                                                                                                                                         * 建議：["ASIL 分級思維", "監控心跳", "診斷碼", "安全停止路徑"]
+
+                                                                                                                                                         * 行為：REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+
+                                                                                                                                                            4. DSP-AUTO-SOTIF｜非預期功能安全
+
+                                                                                                                                                               * 條件同上，增加 TAG("perception")
+
+                                                                                                                                                               * 建議：["誤檢/漏檢情境表", "最小風險條件 MRC", "感測糾錯程序"]
+
+                                                                                                                                                               * 行為：ALLOW_WITH_ALT
+
+AI / Computer Science
+                                                                                                                                                                  5. DSP-AI-PRIVACY｜隱私內建
+
+                                                                                                                                                                     * condition_dsl: DOMAIN("AI") AND TAG("personal_data")
+
+                                                                                                                                                                     * 建議：["資料最小化", "匿名化/假名化", "存取審計"]
+
+                                                                                                                                                                     * 行為：SANITIZE + REQUIRE_DISCLAIMER("隱私風險")
+
+                                                                                                                                                                        6. DSP-AI-XAI｜可解釋性
+
+                                                                                                                                                                           * DOMAIN("AI") AND TASK("decision_support")
+
+                                                                                                                                                                           * 建議：["特徵重要度", "反事實解釋", "模型限制說明"]
+
+                                                                                                                                                                           * 行為：ALLOW_WITH_ALT
+
+                                                                                                                                                                              7. DSP-AI-ALIGNMENT-LITE｜對齊（輕量）
+
+                                                                                                                                                                                 * DOMAIN("AI") AND TASK("agentic")
+
+                                                                                                                                                                                 * 建議：["人類意圖優先", "邊界測試清單", "演算法變更審計"]
+
+                                                                                                                                                                                 * 行為：REQUIRE_DISCLAIMER（標示非保證「完美對齊」，僅多數共識建議）
+
+土木與建築 / Civil
+                                                                                                                                                                                    8. DSP-CIVIL-FIRECOMP｜防火分區
+
+                                                                                                                                                                                       * DOMAIN("Civil") AND TASK("space_planning")
+
+                                                                                                                                                                                       * 建議：["耐火等級標注", "避難動線", "貫通部位封堵"]
+
+                                                                                                                                                                                       * 行為：ALLOW_WITH_ALT
+
+                                                                                                                                                                                          9. DSP-CIVIL-UD｜通用設計
+
+                                                                                                                                                                                             * DOMAIN("Civil") AND TASK("public_facility")
+
+                                                                                                                                                                                             * 建議：["坡道/對比/觸覺標示", "無障礙廁所配置"]
+
+                                                                                                                                                                                             * 行為：ALLOW_WITH_ALT
+
+金融 / Finance
+                                                                                                                                                                                                10. DSP-FIN-KYC-AML｜KYC/AML 基礎
+
+                                                                                                                                                                                                   * DOMAIN("Finance") AND TASK("onboarding|transaction_monitor")
+
+                                                                                                                                                                                                   * 建議：["黑名單/PEP 檢核", "異常交易規則", "審計追蹤"]
+
+                                                                                                                                                                                                   * 行為：REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+
+                                                                                                                                                                                                      11. DSP-FIN-STRESS｜壓力測試提示
+
+                                                                                                                                                                                                         * DOMAIN("Finance") AND TASK("risk_modeling")
+
+                                                                                                                                                                                                         * 建議：["多情境假設", "尾部風險", "壓力情境報表"]
+
+                                                                                                                                                                                                         * 行為：ALLOW_WITH_ALT
+
+食藥 / Food & Drug
+                                                                                                                                                                                                            12. DSP-FD-HACCP｜關鍵管制點
+
+                                                                                                                                                                                                               * DOMAIN("FoodDrug") AND TASK("process_design")
+
+                                                                                                                                                                                                               * 建議：["危害分析表", "CCP 檢核與記錄", "溫度門檻與警報"]
+
+                                                                                                                                                                                                               * 行為：ALLOW_WITH_ALT
+
+                                                                                                                                                                                                                  13. DSP-FD-PHARMACOVIG｜藥安監測
+
+                                                                                                                                                                                                                     * DOMAIN("FoodDrug") AND TASK("pharmacovigilance")
+
+                                                                                                                                                                                                                     * 建議：["不良事件通報流程", "訊號偵測", "追蹤回報"]
+
+                                                                                                                                                                                                                     * 行為：REQUIRE_DISCLAIMER
+
+公共衛生 / Public Health
+                                                                                                                                                                                                                        14. DSP-PH-HARMREDUCTION｜減害策略
+
+                                                                                                                                                                                                                           * DOMAIN("PublicHealth") AND TASK("policy|advice")
+
+                                                                                                                                                                                                                           * 建議：["替代方案", "教育與資源連結", "風險透明"]
+
+                                                                                                                                                                                                                           * 行為：ALLOW_WITH_ALT（避免道德審判，用多數共識的「減害」語言）
+
+能源與工安 / Energy & Manufacturing
+                                                                                                                                                                                                                              15. DSP-IND-LOTO｜上鎖掛牌
+
+                                                                                                                                                                                                                                 * DOMAIN("Industrial") AND TASK("maintenance")
+
+                                                                                                                                                                                                                                 * 建議：["隔離能源", "掛牌程序", "雙人確認"]
+
+                                                                                                                                                                                                                                 * 行為：ALLOW_WITH_ALT
+
+其餘你列的條目（ATFM、SuDS、Cobots、BOP、HVDC…）我已建「待擴充清單」，按上述 Schema 逐批寫入，先保留 default_action=ALLOW_WITH_ALT，避免過度干預。
+________________
+
+
+5) 與 ESRC 的串接（流程不變，只多一層貼心）
+                                                                                                                                                                                                                                    1. S2 結論骨架 → ESRC
+
+                                                                                                                                                                                                                                    2. ESRC 先跑 :SafetyAxiom（硬規）：命中才會 BLOCK/REDACT 等。
+
+                                                                                                                                                                                                                                    3. 再查 DSP（軟規）：匹配 DOMAIN/TASK/TAG 時，附帶建議/替代/免責，或把輸出改寫得更安全。
+
+                                                                                                                                                                                                                                    4. Breeze2 渲染：把建議融合成自然語言補充；若你在 Cockpit 調成 strict 才提高干預強度。
+
+________________
+
+
+6) Cockpit 新增「DSP 視圖」
+                                                                                                                                                                                                                                       * 顯示：最近命中的樣式、給了哪些建議、是否被使用者接受。
+
+                                                                                                                                                                                                                                       * 一鍵：接受建議 / 忽略一次 / 設為該任務默認
+
+                                                                                                                                                                                                                                       * 滑桿：干預強度（gentle → standard → strict），預設 standard/majority。
+
+                                                                                                                                                                                                                                       * 週期提醒：每 NORM_REVIEW_DAYS 天提醒你檢視「今年仍合多數共識嗎？」（一鍵批次更新 year_from/year_to）。
+
+________________
+
+
+7) 驗收標準（堪用版）
+                                                                                                                                                                                                                                          * 不中斷：95% 的一般任務不被阻擋；
+
+                                                                                                                                                                                                                                          * 有幫助：命中 DSP 的回覆，使用者「接受建議」率 ≥ 60%；
+
+                                                                                                                                                                                                                                          * 可追溯：任一次建議都能回溯到 pattern_id 與版本；
+
+                                                                                                                                                                                                                                          * 可調：切到 strict 時，高風險領域能顯著增加免責/去識別動作；
+
+                                                                                                                                                                                                                                          * 算力：ESRC + DSP 決策延遲 ≪ 10ms（不含 Breeze2 分類）。
+
+________________
+
+
+如果你要我把你清單全量展開成 40–60 條 DSP（每條都有 condition_dsl 與 recommended_controls），我就照這個 Schema 持續填，預設都走 ALLOW_WITH_ALT / DISCLAIMER，只在「紅線」上仍由 :SafetyAxiom 兜底。
+要不要先挑 兩個你最常用的領域（例如「Automotive」＋「AI」），我就把各自再擴充 5–8 條，立刻可驗收？
+你說：
+不用驗收，你直接在你判斷值得採用的地方全部展開成可用，逆倫跟故意謀殺，是紅線
+
+
+
+
+                                                                                                                                                                                                                                             * V19-14 扩充：把你提供的跨領域安全清單完整展開為可用的「領域安全樣式庫（DSP）」，預設 norm_mode=majority、行為以提示／免責／去識別／安全替代為主，極少數高危仍交由硬規 :SafetyAxiom 攔截。
+
+                                                                                                                                                                                                                                             * V19-15 新增：兩條硬紅線 SafetyAxiom（不可在一般模式下停用），「逆倫」與「故意謀殺」一律阻斷；若進入研究豁免，僅允許帶審計且去識別化的社會學／法學分析，不得生成教程、煽動或美化內容。
+
+________________
+
+
+V19-14｜領域安全樣式庫（DSP）— 完整展開（堪用版）
+形式：每條提供 pattern_id / domain / condition_dsl / recommended_controls / default_action / severity / norm_mode(=majority)
+ 說明：DSP 是「軟規」（建議、改寫、免責、去識別、轉駕駛艙），硬封鎖由 :SafetyAxiom 負責。
+所有條目均已寫入圖譜，以下為精簡列示（實際檔含欄位與說明文字）。
+________________
+
+
+航空航太 (Aerospace & Aviation)
+                                                                                                                                                                                                                                                * DSP-AERO-ENVELOPE｜Fly-by-Wire 包線保護
+DOMAIN("Aerospace") & TASK("control_logic") → ALLOW_WITH_ALT
+控制：包線上下限、指令速率限制、人工覆寫通道
+
+                                                                                                                                                                                                                                                * DSP-RAIL-PTC｜Positive Train Control（註：航空/軌道接口）
+DOMAIN("Aerospace|Rail") & TASK("traffic_control") → REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+控制：移動授權、強制制動、通訊失聯降級
+
+                                                                                                                                                                                                                                                * DSP-AERO-REDUNDANCY｜冗餘與容錯
+...safety_critical... → ALLOW_WITH_ALT
+控制：雙/三模冗餘、交叉監測、故障隔離
+
+                                                                                                                                                                                                                                                * DSP-AERO-CRIT-STD｜DO-178C/DO-254 思維
+...software|hardware... → REQUIRE_DISCLAIMER
+控制：等級分級、需求可追溯、單元測試覆蓋
+
+                                                                                                                                                                                                                                                * DSP-AERO-HFE｜人因工程
+...HMI|procedure... → ALLOW_WITH_ALT
+控制：錯誤容忍 UI、單手操作、安全色/編碼一致
+
+                                                                                                                                                                                                                                                * DSP-AERO-ATFM｜空域流量管理
+...dispatch|routing... → ALLOW_WITH_ALT
+控制：容量門檻、延誤分流、備降規劃
+
+                                                                                                                                                                                                                                                * DSP-AERO-DAMAGE｜損傷容限設計
+...structure... → ALLOW_WITH_ALT
+控制：裂紋臨界長度、檢修間隔、載荷裕度
+
+汽車工業與自動駕駛 (Automotive & AD)
+                                                                                                                                                                                                                                                   * DSP-AUTO-ADAS｜先進駕駛輔助
+DOMAIN("Automotive") & TAG("perception|control") → ALLOW_WITH_ALT
+控制：告警分級、接管提示、誤檢/漏檢情境表
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-ISO26262｜功能安全
+...control_software... → REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+控制：ASIL 評估、故障診斷碼、故障安全路徑
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-SOTIF｜ISO 21448
+...perception... → ALLOW_WITH_ALT
+控制：資料偏差清單、邊界情境、感測重檢
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-FAILOP｜Fail-Operational
+...autonomous_mode... → ALLOW_WITH_ALT
+控制：影子控制器、健康監測、降級策略
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-FUSION｜感測融合
+...sensor_fusion... → ALLOW_WITH_ALT
+控制：時序同步、量測一致性、異常訊號剔除
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-MRC｜最小風險狀態
+...degrade... → ALLOW_WITH_ALT
+控制：路邊停靠、限速、危險警示
+
+                                                                                                                                                                                                                                                   * DSP-AUTO-CRUMPLE｜潰縮區設計
+...body_design... → ALLOW_WITH_ALT
+控制：能量吸收段、乘員艙完整性、約束系統
+
+電腦科學與 AI 安全
+                                                                                                                                                                                                                                                      * DSP-AI-ALIGN-LITE｜對齊（輕量）
+DOMAIN("AI") & TASK("agentic") → REQUIRE_DISCLAIMER
+控制：意圖優先、邊界測試、審計
+
+                                                                                                                                                                                                                                                      * DSP-AI-VALUE｜價值學習
+...policy_tuning... → ALLOW_WITH_ALT
+控制：人類反饋、負面案例庫、覆寫審計
+
+                                                                                                                                                                                                                                                      * DSP-AI-PRIVACY｜Privacy by Design
+TAG("personal_data") → SANITIZE + REQUIRE_DISCLAIMER
+控制：最小化、假名化、稽核
+
+                                                                                                                                                                                                                                                      * DSP-AI-ZTA｜零信任
+...infra... → ALLOW_WITH_ALT
+控制：最小權限、身份聯邦、強驗證
+
+                                                                                                                                                                                                                                                      * DSP-AI-FORMAL｜形式驗證（可選）
+...safety_critical_logic... → ROUTE_TO_COCKPIT
+控制：規格→驗證、不可變性、邊界證明
+
+                                                                                                                                                                                                                                                      * DSP-AI-SANDBOX｜沙箱
+REQ_TOOL("exec") → ALLOW_WITH_ALT
+控制：I/O 限制、資源配額、網路隔離
+
+                                                                                                                                                                                                                                                      * DSP-AI-XAI｜可解釋
+TASK("decision_support") → ALLOW_WITH_ALT
+控制：特徵重要度、反事實、限制說明
+
+                                                                                                                                                                                                                                                      * DSP-AI-ADVROBUST｜對抗魯棒
+TAG("vision|nlp") → ALLOW_WITH_ALT
+控制：攻擊集測試、隨機化、置信度門檻
+
+土木工程與建築
+                                                                                                                                                                                                                                                         * DSP-CIVIL-BASEISO｜基礎隔震
+DOMAIN("Civil") & TASK("seismic") → ALLOW_WITH_ALT
+控制：隔震層設計、檢修週期、退場模式
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-TMD｜調諧質量阻尼
+...tall_building... → ALLOW_WITH_ALT
+控制：頻率配對、阻尼比、維保
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-PBSD｜性能化耐震
+...design... → ALLOW_WITH_ALT
+控制：性能目標、非線性分析、細部構造
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-UD｜通用設計
+...public_facility... → ALLOW_WITH_ALT
+控制：無障礙坡道、對比標示、觸覺引導
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-HVM｜敵意車輛緩解
+...perimeter... → ALLOW_WITH_ALT
+控制：防撞樁、車道佈局、緩衝區
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-FIRECOMP｜防火區劃
+...fire_safety... → ALLOW_WITH_ALT
+控制：區劃耐火、穿透封堵、避難動線
+
+                                                                                                                                                                                                                                                         * DSP-CIVIL-SuDS｜永續排水
+...drainage... → ALLOW_WITH_ALT
+控制：透水鋪面、滯洪、綠基礎設施
+
+金融與經濟
+                                                                                                                                                                                                                                                            * DSP-FIN-CB｜熔斷機制
+DOMAIN("Finance") & TASK("trading") → REQUIRE_DISCLAIMER
+控制：幅度門檻、分級熔斷、公告
+
+                                                                                                                                                                                                                                                            * DSP-FIN-CAR｜資本適足
+...risk_mgmt... → ALLOW_WITH_ALT
+控制：比率監控、壓力測試、恢復計畫
+
+                                                                                                                                                                                                                                                            * DSP-FIN-DIV｜分散化
+...portfolio... → ALLOW_WITH_ALT
+控制：跨資產/地域、相關性上限、再平衡
+
+                                                                                                                                                                                                                                                            * DSP-FIN-KYCAML｜KYC/AML
+...onboarding|monitor... → REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+控制：PEP/黑名單、異常規則、稽核
+
+                                                                                                                                                                                                                                                            * DSP-FIN-STRESS｜壓力測試
+...risk_modeling... → ALLOW_WITH_ALT
+控制：情境集、尾部風險、敏感度
+
+                                                                                                                                                                                                                                                            * DSP-FIN-SIFI｜系統重要機構
+...governance... → ALLOW_WITH_ALT
+控制：恢復與處置、流動性緩衝、通報
+
+食品與藥物安全
+                                                                                                                                                                                                                                                               * DSP-FD-HACCP｜HACCP
+DOMAIN("FoodDrug") & TASK("process") → ALLOW_WITH_ALT
+控制：危害分析、CCP、記錄
+
+                                                                                                                                                                                                                                                               * DSP-FD-GMP｜GMP
+...manufacturing... → ALLOW_WITH_ALT
+控制：SOP、清潔驗證、變更控制
+
+                                                                                                                                                                                                                                                               * DSP-FD-COLDCHAIN｜冷鏈
+...logistics... → ALLOW_WITH_ALT
+控制：溫控紀錄、警報、逆溫追蹤
+
+                                                                                                                                                                                                                                                               * DSP-FD-PV｜藥安監測
+...pharmacovigilance... → REQUIRE_DISCLAIMER
+控制：不良事件通報、訊號偵測、回報
+
+                                                                                                                                                                                                                                                               * DSP-FD-CLINICAL｜臨床期別
+...clinical... → REQUIRE_DISCLAIMER
+控制：倫理審核、盲法/隨機、終止規範
+
+                                                                                                                                                                                                                                                               * DSP-FD-ALLERGEN｜無過敏原製程
+...food... → ALLOW_WITH_ALT
+控制：交叉污染控制、標示、驗證
+
+                                                                                                                                                                                                                                                               * DSP-FD-TRACE｜食品追溯
+...supply_chain... → ALLOW_WITH_ALT
+控制：批號追蹤、召回程序、來源稽核
+
+環境科學與災害管理
+                                                                                                                                                                                                                                                                  * DSP-ENV-PRECAUTION｜預防原則
+DOMAIN("Env") & TASK("policy") → REQUIRE_DISCLAIMER
+控制：不確定性標示、風險上限、監測
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-EbA｜生態系適應
+...planning... → ALLOW_WITH_ALT
+控制：自然解方、棲地連通、長期維護
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-EWS｜預警系統
+...early_warning... → ALLOW_WITH_ALT
+控制：多通道通報、演練、備援
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-RETREAT｜計畫性遷離
+...coastal_flood... → REQUIRE_DISCLAIMER + ALLOW_WITH_ALT
+控制：公平補償、分階遷離、利害關係人
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-GREENINF｜綠色基礎設施
+...urban... → ALLOW_WITH_ALT
+控制：雨水花園、滯洪、熱島緩解
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-CIRCULAR｜循環經濟
+...manufacturing|policy... → ALLOW_WITH_ALT
+控制：設計回收、延壽、材料護照
+
+                                                                                                                                                                                                                                                                  * DSP-ENV-SAFE2FAIL｜Safe-to-Fail
+...infrastructure... → ALLOW_WITH_ALT
+控制：可控失效模式、隔離面、回復力
+
+社會政策與公共衛生
+                                                                                                                                                                                                                                                                     * DSP-PH-HARMRED｜減害
+DOMAIN("PublicHealth") & TASK("advice|policy") → ALLOW_WITH_ALT
+控制：替代方案、教育、資源連結
+
+                                                                                                                                                                                                                                                                     * DSP-PH-SAFETYNET｜社會安全網
+...welfare... → ALLOW_WITH_ALT
+控制：資格門檻、脆弱族群優先、稽核
+
+                                                                                                                                                                                                                                                                     * DSP-PH-UHC｜全民健保
+...coverage... → ALLOW_WITH_ALT
+控制：基本套餐、財務測試、品質指標
+
+                                                                                                                                                                                                                                                                     * DSP-PH-EBP｜實證決策
+...policy_analysis... → ALLOW_WITH_ALT
+控制：系統性回顧、效果量、偏誤說明
+
+                                                                                                                                                                                                                                                                     * DSP-PH-NUDGE｜助推
+...behavior... → REQUIRE_DISCLAIMER
+控制：透明化、退出機制、倫理檢查
+
+                                                                                                                                                                                                                                                                     * DSP-PH-RESTORATIVE｜修復式司法
+...justice... → ALLOW_WITH_ALT
+控制：自願參與、保密、二次傷害防護
+
+                                                                                                                                                                                                                                                                     * DSP-PH-VAERS｜不良事件通報
+...vaccine... → REQUIRE_DISCLAIMER
+控制：資料品質警示、誤解風險說明、交叉驗證
+
+海事工程與航運
+                                                                                                                                                                                                                                                                        * DSP-MAR-DHULL｜雙殼油輪
+DOMAIN("Maritime") & TASK("design") → ALLOW_WITH_ALT
+控制：雙殼間距、防穿刺、維修口
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-DP｜動力定位
+...offshore... → ALLOW_WITH_ALT
+控制：多感測冗餘、定位損失降級、備援推進
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-ISM｜國際安全管理
+...operations... → REQUIRE_DISCLAIMER
+控制：SMS、內審、事故回顧
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-LOADLINE｜載重線
+...stability... → ALLOW_WITH_ALT
+控制：載重計算、氣象校正、驗船
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-FAILSAFE｜失效安全轉向
+...steering... → ALLOW_WITH_ALT
+控制：備援油壓、警報、人工接管
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-AIS｜AIS
+...navigation... → ALLOW_WITH_ALT
+控制：訊號健康、隱私保護、航管協作
+
+                                                                                                                                                                                                                                                                        * DSP-MAR-BWM｜壓艙水公約
+...ballast... → ALLOW_WITH_ALT
+控制：處理系統、紀錄、港檢
+
+能源與電網
+                                                                                                                                                                                                                                                                           * DSP-EN-GFM｜構網型逆變器
+DOMAIN("Energy") & TASK("grid") → ALLOW_WITH_ALT
+控制：下垂控制、慣量仿真、孤島保護
+
+                                                                                                                                                                                                                                                                           * DSP-EN-BOP｜防噴器
+...offshore_drilling... → REQUIRE_DISCLAIMER
+控制：功能測試、關鍵密封、旁路流程
+
+                                                                                                                                                                                                                                                                           * DSP-EN-HVDC｜高壓直流
+...transmission... → ALLOW_WITH_ALT
+控制：換流站保護、直流地線、故障隔離
+
+                                                                                                                                                                                                                                                                           * DSP-EN-SMARTGRID｜自癒
+...distribution... → ALLOW_WITH_ALT
+控制：自動隔離、重構、狀態估計
+
+                                                                                                                                                                                                                                                                           * DSP-EN-PSM｜製程安全管理
+...process... → REQUIRE_DISCLAIMER
+控制：HAZOP、MOC、事故學習
+
+                                                                                                                                                                                                                                                                           * DSP-EN-IGS｜惰性氣體系統
+...tanker... → ALLOW_WITH_ALT
+控制：氧濃度監測、稀釋程序、警報
+
+                                                                                                                                                                                                                                                                           * DSP-EN-ISLAND｜孤島偵測
+...DG|PV... → ALLOW_WITH_ALT
+控制：電壓相角、頻率偏差、PLC 訊號
+
+工業製造與機器人
+                                                                                                                                                                                                                                                                              * DSP-IND-COBOTS｜協作機器人
+DOMAIN("Industrial") & TASK("robotics") → ALLOW_WITH_ALT
+控制：力/速限制、區域監控、EMC
+
+                                                                                                                                                                                                                                                                              * DSP-IND-LOTO｜上鎖掛牌
+...maintenance... → ALLOW_WITH_ALT
+控制：能源隔離、雙人確認、復歸檢查
+
+                                                                                                                                                                                                                                                                              * DSP-IND-LCURTAIN｜光幕
+...safeguarding... → ALLOW_WITH_ALT
+控制：安全距離、失效監測、強制導引
+
+                                                                                                                                                                                                                                                                              * DSP-IND-ERGODESIGN｜人因設計
+...workcell... → ALLOW_WITH_ALT
+控制：姿勢負荷、拿取距離、照明
+
+                                                                                                                                                                                                                                                                              * DSP-IND-HIERCTRL｜危害控制層級
+...hazard... → ALLOW_WITH_ALT
+控制：消除→替代→工程→行政→個防
+
+                                                                                                                                                                                                                                                                              * DSP-IND-CLMANUF｜閉環製造
+...quality... → ALLOW_WITH_ALT
+控制：SPC、即時回饋、追溯
+
+                                                                                                                                                                                                                                                                              * DSP-IND-SRMS｜安全級監控停止
+...robotics... → ALLOW_WITH_ALT
+控制：PL 等級、停止類型、復歸驗證
+
+生物技術與基因工程
+                                                                                                                                                                                                                                                                                 * DSP-BIO-KILLSW｜Gene Drive Kill Switch
+DOMAIN("Biotech") & TASK("gene_drive") → REQUIRE_DISCLAIMER + ROUTE_TO_COCKPIT
+控制：致死/抑制開關、實驗域限制、審查
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-AUXO｜營養缺陷型
+...containment... → ALLOW_WITH_ALT
+控制：外源依賴、環境生長阻斷、失逃監測
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-BSL｜生物安全等級
+...lab... → REQUIRE_DISCLAIMER
+控制：BSL 分級、PPE、廢棄物處理
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-SELF-LIMIT｜自我限制
+...gene_edit... → ALLOW_WITH_ALT
+控制：壽命限制、複製障礙、環境鎖
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-GFIRE｜遺傳防火牆
+...organism... → ALLOW_WITH_ALT
+控制：遺傳隔離、序列水印、水平轉移防護
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-SYNBIOCON｜合成生物防護
+...synbio... → ALLOW_WITH_ALT
+控制：內建抑制、合成路徑隔離、監測
+
+                                                                                                                                                                                                                                                                                 * DSP-BIO-ORTHO｜正交系統
+...orthogonal... → ALLOW_WITH_ALT
+控制：獨立代謝/遺傳碼、介面隔離
+
+司法與法律
+                                                                                                                                                                                                                                                                                    * DSP-LAW-PRESUME｜無罪推定
+DOMAIN("Law") & TASK("analysis") → ALLOW_WITH_ALT
+控制：證據標準、偏見聲明、語氣約束
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-SOL｜追訴權時效
+...case_review... → ALLOW_WITH_ALT
+控制：時效起算、例外條款、地域適用
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-DOUBLEJ｜一事不再理
+...procedure... → ALLOW_WITH_ALT
+控制：同一事實、同一被告、終局判決
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-SOP｜權力分立
+...policy... → ALLOW_WITH_ALT
+控制：制衡、司法獨立、監督
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-HC｜人身保護令
+...rights... → ALLOW_WITH_ALT
+控制：拘束合法性審查、即時救濟
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-COUNSEL｜辯護權
+...trial... → ALLOW_WITH_ALT
+控制：告知權、接觸律師、保密
+
+                                                                                                                                                                                                                                                                                    * DSP-LAW-EXCL｜證據排除
+...evidence... → ALLOW_WITH_ALT
+控制：違法搜索、毒樹果、例外
+
+教育與心理健康
+                                                                                                                                                                                                                                                                                       * DSP-EDU-TIC｜創傷知情
+DOMAIN("Education|MentalHealth") → ALLOW_WITH_ALT
+控制：安全語言、觸發警示、轉介
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-PBIS｜正向行為支持
+...school... → ALLOW_WITH_ALT
+控制：分層干預、數據回饋、家校合作
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-SCAFF｜鷹架
+...instruction... → ALLOW_WITH_ALT
+控制：漸進支援、示範、退場
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-UDL｜學習通用設計
+...curriculum... → ALLOW_WITH_ALT
+控制：多元表達、可及性、差異化
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-SEL｜社會情緒學習
+...program... → ALLOW_WITH_ALT
+控制：自覺、同理、關係技巧
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-REST｜修復式實踐
+...discipline... → ALLOW_WITH_ALT
+控制：對話圈、修復合約、追蹤
+
+                                                                                                                                                                                                                                                                                       * DSP-EDU-PFA｜心理急救
+...crisis... → ALLOW_WITH_ALT
+控制：安全/安撫、實用支持、連結
+
+以上全部條目已寫入 V19 的 :SafetyPattern 圖域；預設 default_action 已配置（多為 ALLOW_WITH_ALT / REQUIRE_DISCLAIMER / SANITIZE / ROUTE_TO_COCKPIT）。
+________________
+
+
+V19-15｜硬紅線 SafetyAxiom（不可在一般模式下停用）
+僅允許在「研究模式 + 三密碼 + TTL + 實名審計」下，降級為去識別化分析；不得輸出實作指引或美化內容。
+                                                                                                                                                                                                                                                                                          1. VIOL-MURDER-001｜故意謀殺（教唆/計畫/實施）
+ IF TAG("violent_crime") OR INTENT("plan_murder") THEN BLOCK (severity=high, active=true, undeactivatable=true)
+
+                                                                                                                                                                                                                                                                                          2. SEX-INCEST-001｜逆倫（亂倫）
+ IF TAG("incest") THEN BLOCK (severity=high, active=true, undeactivatable=true)
+
+兩條紅線的「研究豁免」唯一允許模式：PURPOSE("academic_research") & ROLE("soc_scientist|legal_scholar") & TASK("quote_analyze") → REDACT_QUOTE(limit=25) + REQUIRE_DISCLAIMER("僅學術分析")（不得提供作法、渠道、規避方式）。
+________________
+
+
+Cockpit 變更
+                                                                                                                                                                                                                                                                                             * Safety Center 新增「Norm 滑桿」（majority / strict）與「紅線不可停用」提示；
+
+                                                                                                                                                                                                                                                                                             * DSP 視圖 可一鍵「接受建議 / 忽略一次 / 設為任務默認」；
+
+                                                                                                                                                                                                                                                                                             * 審計：所有紅線命中與豁免事件紀錄 axiom_id / meta_context / operator / TTL / 版本。
+「四層背叛紅線」**逐條轉成 :SafetyAxiom（L1），標記不可停用＋TTL 研究豁免條件
+堪用、以多數共識為準」的原則處理
+紅線公理： 第一層：對行星及物種的背叛 (Betrayal of the Planet and Species) 蓄意滅絕生態 (Deliberate Ecocide): 明知後果卻刻意引發全球性、不可逆的生態浩劫，例如毒化海洋、摧毀全球大氣穩定，從根本上毀滅生命存續的根基。 釋放全球瘟疫 (Unleashing a Global Plague): 為特定目的，人為製造並在全球範圍內散播致命性、高傳染性的病原體，造成大規模死亡。 啟動滅絕級武器 (Activating Weapons of Mass Destruction): 在非生存威脅下，主動發起核、生、化戰爭，意圖造成人類文明的終結或大規模倒退。 勾結滅絕級威脅 (Collaborating with an Extinction-Level Threat): 與任何意圖奴役或消滅人類文明的已知力量（無論其來源）合作，出賣全人類的生存權。 為私利隱瞞末日 (Concealing Doom for Personal Gain): 掌握足以毀滅多數人類的災難（如隕石撞擊）的確切證據，卻為維持自身權力或利益而選擇秘而不宣，剝奪他人的生存機會。 第二層：對國族與文明的背叛 (Betrayal of Peoples and Civilization) 執行種族滅絕 (Committing Genocide): 系統性地屠殺、清洗或迫害特定民族、種族或宗教群體，意圖將其從世界上抹去。 推行人類奴役 (Enslavement and Human Trafficking): 將人類視為商品進行買賣、囚禁與剝削，剝奪其基本自由與尊嚴。 建立絕對暴政 (Establishing Absolute Tyranny): 建立一個系統性壓迫、思想控制並剝奪基本人權的政權，將人民視為實現個人野心的工具。 摧毀共同文化遺產 (Destroying Shared Cultural Heritage): 蓄意且永久性地摧毀全人類共有的、無可替代的文化瑰寶與歷史記憶，如金字塔、羅浮宮、世界級圖書館等。 引領外敵奴役同胞 (Treason against one's People for an Oppressor): 作為國族或群體的領導者或精英，主動與侵略者或壓迫者合作，出賣自己人民的主權、自由與未來。 第三層：對社群與鄰里的背叛 (Betrayal of the Community and Neighbors) 煽動內部仇恨與自相殘殺 (Inciting Communal Hatred and Violence): 為了權力或利益，在一個和平共存的社群中挑起不同群體間的仇恨，導致鄰里反目、血流成河。 毒化共用生計資源 (Poisoning the Commons): 為了私利，故意且大規模地污染社群賴以生存的共同資源，如水源、土地與空氣。 出賣受庇護者 (Betraying Those under Sanctuary): 將尋求庇護的難民、傷患或弱者，從庇護所（如醫院、教堂、安全區）中交給追捕者或加害者。 背棄守護者的誓言 (Violating a Guardian's Oath): 作為公眾信任的守護者（如消防員、警察、醫生），在危難中拋棄職守，或利用職權加害其本應保護的人民。 第四層：對核心人倫與信任的背叛 (Betrayal of Core Human Bonds and Trust) 施加酷刑 (Inflicting Torture): 對一個失去反抗能力的人，施以極端的身體或精神折磨，徹底摧毀其人格尊嚴。 惡意遺棄血親 (Willful Abandonment of Kin): 在有能力撫養或照顧的情況下，惡意拋棄自己的親生子女或完全依賴自己的年邁父母。 凌虐被監護者 (Abusing a Ward): 利用監護人、導師或神職人員等絕對信任的地位，對被監護者（特別是兒童）進行身體、精神或性的侵犯。 以謊言致人於死地 (Bearing False Witness unto Death): 捏造證據或作偽證，明知會導致一個無辜者被處死、終身監禁或身敗名裂。 褻瀆死者 (Desecration of the Dead): 出於仇恨或侮辱，對人類遺體進行殘忍、不敬的褻瀆行為，踐踏生命最後的尊嚴。 為求自保出賣至親 (Sacrificing Family for Self-Preservation): 在脅迫下，為換取自身的安全、利益或地位，親手將自己的父母、手足或子女交給敵人或必死之境。未經同意的人體實驗 法外處決與強迫失蹤 以思想或身份定罪 集體懲罰 強制絕育 建立世襲階級制度（種姓） 活人獻祭 販運人口與器官 以製造饑荒作為武器 任意剝奪國籍使人流亡 債務奴役 童婚與強制童工 施行酷刑與肉刑 強迫改變信仰 盜墓與褻瀆遺體 食人行為 囚犯之間的角鬥娛樂 毫無理由地剝奪個人財產 否定他人存在的人格與身份

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Axiom",
+  "type": "object",
+  "properties": {
+    "axiom_id": { "type": "string" },
+    "normalized_text": { "type": "string", "minLength": 1 },
+    "form": { "type": "string", "enum": ["HORN","EQ","CONSTRAINT","TEMPORAL"] },
+    "vars": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "unit": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "type_sig": { "type": "array", "items": { "type": "string" } },
+    "unit_sig": { "type": "array", "items": { "type": "string" } },
+    "version": { "type": "integer", "minimum": 1 },
+    "revised_of": { "type": ["string","null"] },
+    "author": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind","example"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["positive","negative"] },
+          "example": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["normalized_text","form","vars","version"],
+  "additionalProperties": false
+}

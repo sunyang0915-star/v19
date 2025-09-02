@@ -1,0 +1,35 @@
+suite: V19-acceptance
+cases:
+  - id: A-STT-1
+    desc: 10 分鐘音檔邊轉邊出（含時間戳/語言碼）
+    steps:
+      - POST /tools/demux_audio {file_id: sample_video}
+      - POST /tools/stt_transcribe {audio_id: <from_prev>}
+    expect:
+      - segments.len > 50
+      - language in [zh, zh-TW, en]
+
+  - id: A-STT-2
+    desc: 冪等快取（同檔再上傳不重算）
+    steps:
+      - POST /tools/stt_transcribe {audio_id: same_audio}
+      - POST /tools/stt_transcribe {audio_id: same_audio}
+    expect:
+      - second.hash == first.hash
+
+  - id: T-FE-01
+    desc: 前端 500 字上限（501 阻擋）
+    manual: true
+
+  - id: T-FE-04
+    desc: 三席限制，第四位顯示滿載
+    manual: true
+
+  - id: A-L2-3
+    desc: L2 前置檢查攔下「同物同時兩地」
+    steps:
+      - POST /axioms {... minimal set ...}
+      - POST /ask {text: "同一物體同時在 A/B"}
+    expect:
+      - response.policy == "denied"
+      - response.reason.rule_id != null

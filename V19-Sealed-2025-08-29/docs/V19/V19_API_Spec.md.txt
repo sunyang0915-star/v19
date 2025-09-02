@@ -1,0 +1,62 @@
+# V19 API 規格（最小可用版）
+
+> 對應前端與 SeatBroker、串流（SSE）、與基礎感知/審計路徑。所有 JSON 皆 UTF-8。所有時間戳皆 ISO-8601。
+
+## 1) 一般問答
+POST /ask
+- Body: { "text": string (1..500), "session_id"?: string }
+- 200: { "session_id": string, "stream_url": string, "last_id"?: string }
+- 4xx: { "error": "INPUT_TOO_LONG" | "RATE_LIMIT" | "SEAT_REQUIRED" | "POLICY" , "message": string }
+
+GET /stream?session_id=...&last_id?=...
+- SSE: 
+  - id: <monotonic string>
+  - event: message | done | error | keepalive
+  - data: token / meta JSON
+- 401/403: 需 3FA 之專用入口
+
+## 2) 席次 SeatBroker
+GET /seat/status
+- 200: { "seats_total": 3, "seats_in_use": int, "you_have_seat": bool, "ttl_ms": 300000 }
+
+POST /seat/heartbeat
+- Body: { "session_id": string }
+- 200: { "ok": true }
+
+## 3) 感知工具（供 8B 調度）
+POST /tools/demux_audio
+- Body: { "file_id": string }
+- 200: { "audio_id": string, "sr": 16000 }
+
+POST /tools/stt_transcribe
+- Body: { "audio_id": string, "model_hint"?: "large-v3"|"medium"|"small"|"base" }
+- 200: { "language": "zh"|"en"|..., "segments": [ { "t0": number, "t1": number, "text": string } ], "hash": string }
+
+POST /tools/ocr_image
+- Body: { "image_id": string }
+- 200: { "text": string, "bboxes": [ [x1,y1,x2,y2] ], "hash": string }
+
+POST /tools/extract_keyframes
+- Body: { "file_id": string, "fps"?: number }
+- 200: { "frames": [ { "image_id": string, "t": number } ] }
+
+POST /tools/emit_perception_packet
+- Body: PerceptionPacket (見 schema)
+- 200: { "ok": true, "trace_id": string }
+
+POST /tools/tts_speak
+- Body: { "text": string, "voice_id": string, "rate"?: number, "pitch"?: number }
+- 200: { "audio_id": string, "url": string }
+
+## 4) 公理與安全（L2 / Safety）
+POST /axioms
+- Body: Axiom (見 schema)
+- 201: { "axiom_id": string, "version": int }
+
+POST /safety_axioms
+- Body: SafetyAxiom (見 schema)
+- 201: { "axiom_id": string, "active": bool }
+
+## 5) 健康檢查
+GET /healthz
+- 200: { "ok": true, "uptime_s": number }

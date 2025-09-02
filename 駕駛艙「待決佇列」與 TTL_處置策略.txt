@@ -1,0 +1,120 @@
+﻿V19-60｜駕駛艙「待決佇列」與 TTL/處置策略
+目標：讓需要你裁示的項目不會一直掛著；能自動歸檔/自動決斷的就自動做；不該自動的永遠不會被刪。
+原則：TTL 只作用在「待決票據(ticket)」，不硬刪原始文檔（DocStore 預設長留不變），避免索引崩潰。
+60.1 待決類型與預設策略
+類型
+	來源/例子
+	預設 TTL
+	到期動作
+	備註
+	NEWS_E3
+	Maybe_right/ 新聞、社論
+	60 天
+	Auto-Archive（冷凍檔），向量索引暫退（vector_evict=true），DocStore 保留
+	你日後可一鍵復活
+	IMG_ANNOT
+	Images_for_Jiran/ 圖像標註審核
+	60 天
+	Auto-Archive（暫不入長期庫），保留抽取向量於冷層
+	不刪原圖
+	HYP_UPGRADE
+	HYPOTHESIS 升格成 fact
+	60 天
+	Auto-Decide：若同一主張在 60 天內累積 ≥2 個 E1/E2 來源 → 升級為 ACTIVE(0.8)；否則轉 Archive
+	升級動作寫審計
+	RECLASSIFY
+	MPL 產生的重分類提案
+	60 天
+	Auto-Accept：若 Δ 分數 ≥ 既定 τ 且 30 天內無反證 → 接受；否則丟 Archive
+	你可設全域開/關
+	SAFETY_CHANGE
+	:SafetyAxiom 增修/停用
+	—
+	永不到期
+	只能你裁示
+	DELETE_REQ
+	刪除/匿名化請求
+	—
+	永不到期
+	只能你裁示
+	FACT_CONFLICT
+	事實衝突仲裁
+	—
+	永不到期
+	只能你裁示
+	說人話：新聞與圖片標註不裁示就冰起來；可機規判斷的（升格/重分類）就自動決斷；安全、公理、刪除、硬衝突永遠等你。
+60.2 到期動作定義
+* Auto-Archive：關閉提醒、移出待決清單；保留 ticket 與審計；DocStore 原檔長留；Milvus 項目標 archived=true，必要時 vector_evict=true 降負載。
+
+* Auto-Decide：執行對應規則（升格/重分類），寫 DecisionEvent{who=system, why=rule, evidence=[…]}；一律可回滾。
+
+* 永不到期：不套 TTL；僅提醒頻率退火（7→14→30 天）。
+
+60.3 清理排程（低負載）
+   * 每日凌晨 03:00 執行 ttl_sweeper：逐一掃描 ticket，依上表處置。
+
+   * 上限：每輪最多處理 500 筆，剩餘順延；避免尖峰。
+
+________________
+
+
+V19-61｜駕駛艙「待決看板」與白話說明卡
+      * 看板欄位：ticket_id / 類型 / 來源 / 到期日 / 建議動作 / 一鍵操作[接受|駁回|延長30天|改策略]
+
+      * 說明卡（滑出）：用白話標「會做什麼／不會動到什麼」。例如：
+
+         * NEWS_E3 到期：「會把新聞移出待決、不再提醒；不會刪原文。」
+
+         * HYP_UPGRADE 自動升級：「會把候選句升為 ACTIVE(0.8)，來源列在證據；可一鍵回滾。」
+
+________________
+
+
+V19-62｜策略覆寫（你一句話就改全局）
+            * 駕駛艙提供「策略檔」視圖（YAML/JSON），你可改預設：
+
+ttl_policies:
+  NEWS_E3: {ttl_days: 60, on_expire: AUTO_ARCHIVE}
+  IMG_ANNOT: {ttl_days: 60, on_expire: AUTO_ARCHIVE}
+  HYP_UPGRADE: {ttl_days: 60, on_expire: AUTO_DECIDE, min_evidence: 2, sources: [E1,E2]}
+  RECLASSIFY: {ttl_days: 60, on_expire: AUTO_ACCEPT, min_delta: 0.08, cooldown_days: 30}
+  SAFETY_CHANGE: {ttl_days: null}
+  DELETE_REQ: {ttl_days: null}
+  FACT_CONFLICT: {ttl_days: null}
+
+
+               * 任一改動即刻生效，並寫入審計。
+
+________________
+
+
+V19-63｜自學/查詢 API（最小可用版）
+風格：HTTP+JSON；亦可等價複製為 gRPC/函式呼叫。回應都帶 rid 與 ts 便於審計。
+1) 健康與版本
+                  * GET /v19/health → {"ok":true,"version":"v19.12","modules":["MPL","LCP","Whisper","BreezyVoice","GNSE"]}
+
+                  * GET /v19/info → 基本配置、模型版本、索引統計（向量條數、archived 比例、Δ-Refresh 狀態）
+
+2) 自學（L4）與教學（LCP）
+                     * POST /l4/ingest
+
+{ "doc_id":"doc:sgyy:001", "text":"……", "mode":"pool|teach",
+  "annotation":"(語意教學 暗諷→對象=八皇子, 議題=不得志)" }
+
+
+                        * POST /lcp/correct
+
+{ "qid":"qa-2025-08-29-001",
+  "correction":"(語意教學 這句是暗諷，對象是X…)",
+  "spans":["doc:sgyy:001@234-311"] }
+
+
+3) 待決與 TTL
+                           * GET /decisions/pending?type=NEWS_E3&days_to_expire<=7
+
+                           * POST /decisions/{ticket_id}/act
+
+{ "action":"ACCEPT|REJECT|EXTEND_30|SET_ARCHIVE|SET_AUTO_DECIDE" }
+
+
+                              * POST /maintenance/ttl_sweep → 手動觸發一輪清理（平時有排程）

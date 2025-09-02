@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FusionScoringConfig",
+  "type": "object",
+  "properties": {
+    "weights": {
+      "type": "object",
+      "properties": {
+        "structure": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantics": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "required": ["structure","semantics"],
+      "additionalProperties": false
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "accept": { "type": "number", "minimum": 0, "maximum": 1 },
+        "clarify": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "required": ["accept","clarify"],
+      "additionalProperties": false
+    },
+    "topk": { "type": "integer", "minimum": 1, "maximum": 50 }
+  },
+  "required": ["weights","thresholds","topk"],
+  "additionalProperties": false
+}

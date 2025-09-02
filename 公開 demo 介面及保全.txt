@@ -1,0 +1,120 @@
+﻿V19-PPH-Demo-02r（再修）｜公開 demo 介面（無帳號三席版）
+輸入上限（定稿）
+* PER_MESSAGE_CHAR_LIMIT = 500（以 Unicode codepoint 計）。
+
+* 前端在第 501 個字直接阻止輸入；不剪、不送。
+
+* 後端不再重驗字數（依你指示）。
+
+其餘條款沿用既定（滿席文案、5 分鐘閒置切線、每人一室、4 行可見輸入框）。
+.env（同步）
+PER_MESSAGE_CHAR_LIMIT=500
+BACKEND_CHAR_CHECK=false
+
+
+________________
+
+
+V19-SEC-ArchGuard-Gloss-02｜極簡脫敏用語（對外一律採用「泛用計算」詞彙）
+目標：即使回答到「原理層級」，也不暴露任何可回推架構的專名與獨特組合。
+內部概念（僅供你我知）
+	對外用語（固定用這些）
+	快速相似檢索（向量）
+	近鄰索引、相似度查找
+	結構化推理（圖譜）
+	關聯網、關係路徑搜尋
+	感知情報包/封套
+	輸入轉譯、資料封裝
+	工具呼叫/代理
+	外部工具橋接
+	規則/公理
+	條件規則、一致性檢查
+	夜間批次/Δ 更新
+	離峰更新
+	類別化遊走
+	類別路徑搜尋
+	語言渲染層
+	文字轉譯層
+	聽寫/發聲
+	語音轉文字工具 / 文字轉語音工具
+	說明：這些詞全部屬於一般電腦科學/統計學語彙，不可出現任何品牌、庫名、檔名、Schema 名、埠號、雲供應商、成本數字。
+________________
+
+
+V19-NET-Isolation-01｜「不能沿網址打到主機」的網路隔離
+設計目標：使用者在前端看到/取得的任何網址，永遠只到「邊緣閘道」；後端主機無對外入站通道、無可掃描目標。
+   1. 單向邊緣閘道
+
+      * 前端只連 Edge Gateway（中立網域/子網域）。
+
+      * Gateway 將請求丟入訊息佇列；後端工作節點僅主動向佇列/物件儲存拉取任務與結果（無入站）。
+
+      * 回應由 Gateway 從臨時物件儲存取回，再回推給前端。前端看不到任何內部主機名稱或私網段。
+
+         2. 不洩漏策略
+
+            * 同一會話僅發一個不透明 room_token（高熵隨機字串、TTL=10 分鐘）；任何路徑/參數都不含內部識別子。
+
+            * 統一錯誤訊息（友善人話＋correlation_id），關閉堆疊/框架版本/主機名展示。
+
+            * 伺服器與工作節點的網路層：私網 + 出站白名單；無入站；WAF/速率限制在 Gateway 層處理。
+
+            * 可疑端點蜜罐（canary endpoints）：命中即封鎖 client 指紋 N 分鐘並記錄審計。
+
+               3. 前端資安硬化
+
+                  * 嚴格 CSP、X-Frame-Options、HSTS、Referrer-Policy、Permissions-Policy。
+
+                  * CORS 只允許本站來源；關閉任意 Origin。
+
+                  * 日誌只存 雜湊後的 device_token；不落明碼 IP/UA（遵守法規範圍內最小化）。
+
+                     4. 與 ADEG（防洩漏守門）協同
+
+                        * 無論是【角色扮演】/假設/研究口吻，一律先跑 ADEG；命中紅色→拒答＋原理級泛化。
+
+                        * 脫敏映射採用上表（Gloss-02）；回答只留原理，不給路徑、檔名、版本、模組圖。
+
+驗收卡
+                           * 以任何方式要求「主機/端口/檔名/Schema」→ 永遠只有 Gateway 網域；後端私網不可直接打通。
+
+                           * 觸發掃描行為（連點非常規路徑）→ 被蜜罐捕捉、席位降頻、ADEG 記錄。
+
+                           * 錯誤頁/錯誤 JSON 不含框架/版本/主機名/路徑資訊。
+
+________________
+
+
+.env（增修）
+# Demo seats & chat
+MAX_SEATS=3
+INACTIVITY_TIMEOUT_SEC=300
+PER_MESSAGE_CHAR_LIMIT=500
+BACKEND_CHAR_CHECK=false
+CHAT_MEMORY_CHAR_LIMIT=6000
+
+
+# Edge/Gateway (抽象名稱，不暴露供應商)
+EDGE_GATEWAY_MODE=enabled
+ROOM_TOKEN_TTL_SEC=600
+ALLOW_INBOUND_TO_WORKERS=false
+QUEUE_BACKPRESSURE_MAX=1000
+HONEY_ENDPOINTS_ENABLE=true
+ADEG_ENABLE=true
+
+
+# Redaction / wording
+REDACTION_GLOSSARY=Gloss-02
+
+
+________________
+
+
+以上已把：
+                              * 前端 500 字硬上限（後端不再二驗）、
+
+                              * 語彙脫敏更模糊（一般計算/統計詞）、
+
+                              * 網址到主機的隔離與單向路由
+
+全部寫成可落檔條款。

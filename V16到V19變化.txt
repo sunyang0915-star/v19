@@ -1,0 +1,58 @@
+﻿快速稽核結果（V19 對照 V16）：
+已承接 / 已強化
+* 母語＝繁中（台灣語境），英語高效處理：V19 延續，並以 Breeze2-8B 做渲染/調度、Whisper 做 STT、BreezyVoice 做 TTS。
+
+* 組裝而非自造 / 3090 友善：沿用；新增 DocStore 長留、快取/TTL 策略、Δ-Refresh、MPL 省算力規範。
+
+* 雙系統：Milvus（快思）＋ Neo4j（慢想）；V19 新增 GNSE + 稀疏辨識 Appendix G、融合打分、typed-walk。
+
+* 可審計學習：LCP 即時更正、ReclassifyEvent、Append-only 審計、可回滾；待決 TTL 60 天與 Auto-Archive/Auto-Decide。
+
+* 安全：SafetyAxiom（L2）＋「倫理與安全審查核心」；Meta-指令【…】協議；不觸及 L1 紅線。
+
+* 公理入口：寬鬆輸入→嚴格正規化（AX-IO-01r / AX-NORM-02r）已合併。
+
+疑似遺漏 / 建議補位（直接給可落檔條款）
+1) 對外展示端「三席並發」＋公平排程（V16 有提，V19 未明文化）
+ V19-PPH-Seat-01
+   * 公開演示廳（Q&A Web）同時上線上限 3 人；排程採 輪詢 1 訊息/輪，單用戶訊息上限 2k chars。
+
+   * 超額者進等候隊列；看板顯示預估等待順序；資料彼此隔離（每席各自 session 與索引視圖）。
+
+2) 影像上傳尺寸策略（舊規在 V18，V19 要對齊 DocStore 長留）
+ V19-IMG-IO-01
+      * 上傳上限 30MB；管線：原檔長留於 DocStore → 產生 ≤5MB 派生檔 供解構/向量化。
+
+      * 若壓縮器不可用則臨時回退「僅允許 ≤5MB 上傳」。
+
+      * 入庫評分：AI 標註=0.7；你人工標註=0.8/0.9；若全文匹配既有 L2 文本→升 1.0。
+
+3) 翻譯策略去 M4T 依賴（V18 曾提 M4T，V19 改用 8B）
+ V19-TRANS-01
+         * 非 zh-TW 文本：預設保留 raw_original；必要時由 Breeze2-8B 工具函式 translate_zh_tw() 生成 raw_translated_zh_tw（可關）。
+
+         * 影響面：Milvus metadata 不再要求 raw_translated_zh_tw 一定存在；檢索時做語言感知。
+
+4) 公理變更三重驗證（Tri-Seal）重申（你先前同意，但 V19 尚未標號）
+ V19-Axiom-Guard-01
+            * 適用範圍：Axiom / SafetyAxiom 新增、修改、停用。
+
+            * 進入條件：三重驗證（登入密碼 + 一次性碼 + 文字口令/通關字）。
+
+            * 行為：變更寫 AxiomChangeEvent{who, what, diff, tests, rollback_token}；強制跑回歸測。
+
+5) //SIM_OVERRIDE 顶層指令（V16 有，V19 建議明文化）
+ V19-SIM-01
+               * 當輸入以 //SIM_OVERRIDE 開頭：Breeze2-8B 必須壓制外部既知，僅以你提供的內容建構本回合宇宙；審計記錄 sim_override=true。
+
+6) 庫間去重與 CAS（內容可尋址）
+ V19-DocStore-CAS-01
+                  * DocStore 以 BLAKE3 做內容雜湊（CAS 路徑）；跨目錄同檔不重複存；Neo4j/Milvus 只存 doc_id@span。
+
+7) 「台灣語境」檢核鉤子
+ V19-Locale-TW-01
+                     * 渲染前針對 zh-TW 文案跑 用詞表/地名/量詞 檢核；不合本地習慣時給修辭建議（不改事實）。
+
+8) L4 自學長週期、無人工批改（你最新決策）
+ V19-L4-SelfLearn-01
+                        * L4_pool 產生 label_source="self" 的低信度標籤，不需人工批；靠 LCP 更正與 MPL 重分類逐步提權。

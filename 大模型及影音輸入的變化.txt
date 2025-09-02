@@ -1,0 +1,87 @@
+﻿直接給「是否採用 Whisper」的決策＋一套能落檔的最優配置（只用 Llama-Breeze2-8B 做感知/工具調度、BreezyVoice 做 TTS，再加上一個 STT 工具：OpenAI Whisper）。語氣簡潔、白話、可直接寫入 V18。 決策（一句話） 採用 Whisper 當 STT（語音轉文字）預設引擎，以「工具插槽」方式接到 8B 的函式呼叫；8B 只負責調度與格式化，不做推理。理由是：準確、穩定、離線可用、支援時間戳，對中英／臺灣口音表現好，且在 RTX 3090 上用加速版可達到實用吞吐。 怎麼用（最優配置） 0) 角色邊界（再釘一次） 8B（感知/調度）：讀文字、看圖與 OCR、切片與欄位化、呼叫工具（ffmpeg/Whisper/BreezyVoice），嚴禁推理。 Whisper（STT）：把音訊→時間戳文字稿（segments）。 BreezyVoice（TTS）：把已定稿的文字→語音（臺灣口音）。 自研引擎：唯一直覺與推理的地方（系統一/系統二）。 1) STT 工具插槽（Whisper） 實作建議：用「加速版 Whisper」（如 CTranslate2 的 faster-whisper）作後端，開 GPU FP16 / INT8。 模型建議（依場景自動切） large-v3：預設（高準確、穩健多語），3090 可跑；重品質用它。 medium：中量場景（省 VRAM、加速些）。 small/base：CPU 備援（服務緊時保延遲）。 語言策略：lang=auto，若偵測 zh/zh-TW → 強制 --language zh 提升穩定性；同時返回語言碼。 斷詞/時間戳：輸出 分段＋起迄秒數；長檔採 分塊流式（邊轉邊出）。 雜訊治理：開 VAD（靜音偵測） 與過門檔頭尾靜音；噪音高則自動降到更穩的模型。 冪等與去重：以音訊雜湊＋長度當 key；重傳不重做，直接讀快取。 儲存策略：長留 Transcript＋指紋；原始音檔不長留（除非你勾選保留）。 2) 8B ↔ 工具白名單（函式呼叫） demux_audio(file) → ffmpeg 抽音（單聲、16kHz） stt_transcribe(audio, model_hint) → Whisper 段落陣列（含 [t0,t1) 與文字） ocr_image(img) / extract_keyframes(video) → 圖像理解用 format_transcript(spans) → 統一結構 emit_perception_packet(json) → 將意圖/實體/關鍵片段以結構化 JSON交回自研引擎 tts_speak(text, voice_id, rate?, pitch?) → BreezyVoice 語音輸出 8B 只能呼叫白名單；一旦偵測「自行推理」語跡，流程即中斷，改交自研引擎。 3) 統一感知流程（你既有三步，落到工具） 輸入：文字、圖片、音訊（mp3/wav）、影音（mp4）都可以 預處理： 影音 → demux_audio 抽音； 音訊 → stt_transcribe 產 Transcript； 圖片 → ocr_image / extract_keyframes； 核心解構（8B）：把「Transcript／圖片理解結果／純文字」一起丟給 8B，由 8B 用 Function Calling 直接輸出結構化 JSON 情報包（意圖、實體、時間戳片段、圖像標註、候選 micro-facts 等）。 深度思考：自研引擎（Milvus 系統一、Neo4j 系統二）照你既定協議跑溯因、多假設驗證。 渲染：把結論骨架交回 8B 做繁中渲染（僅修辭，不增新事實）→ 交給 BreezyVoice 合成語音。 輸出：文字＋語音；引用附 L 層/E 層 與 doc_id@span。 4) 存取與分流（照你規則） 放哪就依哪套： Facts/：影音/音訊來源的內容，最高只到 maybe_right；權威到位才升 ACTIVE。 Maybe_right/：直接當候選證據；與已有事實完全相符→不增事實，掛 evidence＋alias。 Stories/：版控；可引用，不出事實。 Courses/：教材，標 L3/E2，可提煉。 原始影音預設不長留；主資產是 Transcript、關鍵影格標註與索引。 5) 資源與佇列（3090／1.5TB 親和） Whisper：加速版跑在 3090；長檔分段流式；快取命中直接回。 8B：INT4/INT8，單實例；I/O 任務交給 CPU；函式呼叫有超時與重試。 BreezyVoice：CPU，多工受速率限制；音檔快取（建議 10GB/7 天）。 儲存：總艙 1.5TB 上限；各資產走你既定保留/清理策略。 驗收卡（你一看就能勾） A-STT-1：上傳 10 分鐘音檔 → 邊轉邊出 Transcript（含時間戳/語言碼），品質穩定。 A-STT-2：同檔再上傳 → 快取命中，不重算。 A-IMG-1：圖片＋文字 → 8B 直接產結構化情報包（含 OCR 與標註）；整段匹配則權重升 1.0。 A-PIPE-1：8B 嘗試推理 → 被護欄阻斷，轉交自研引擎。 A-OUT-1：定稿文字 → BreezyVoice 2 秒內開始串流語音；可打斷；重播命中快取。 要不要就這樣寫進 V18？ 我把以上條款命名為： v18-ASR-Whisper-01（Whisper 插槽與模型級別） v18-Perception-Packet-01（8B 情報包與白名單函式） v18-AV-Ingest-Unified-01（統一感知流程） v18-TTS-BreezyVoice-01（語音輸出與快取） 你一句「同意，寫入 V18」，我就把條款原文落檔。若你要改任何數字（例如 STT 模型預設從 large-v3 改 medium、TTS 快取改 5GB/3天），直接把數字丟給我，我用你的原文入檔。 你說： 同意，寫入 V18 謝謝你 在考慮下一個問題 ChatGPT 說： 收到，感謝拍板。以下四組條款已整理成可直接貼回《V18》：我用你最後的決策—8B 做感知/調度＋BreezyVoice 做 TTS＋Whisper 當預設 STT—落到條文。 v18-ASR-Whisper-01｜語音轉文字（STT） 預設引擎：OpenAI Whisper（建議後端：faster-whisper / CTranslate2），GPU FP16/INT8，RTX 3090 可用。 模型級別：預設 large-v3；壓力時自動降 medium；CPU 備援 small/base。 語言策略：lang=auto；偵測 zh/zh-TW 時強制 --language zh，同時回傳語言碼。 輸出格式：分段 Transcript（[t0,t1)＋text），支援長檔分塊串流。 雜訊處理：啟用 VAD/靜音裁切；噪音高則自動切小模型增穩。 冪等快取：以 音訊雜湊＋長度 做 key；重傳不重算。 留存策略：長留 Transcript＋指紋；原始音檔預設不長留（你勾選才保留）。 v18-Perception-Packet-01｜8B 情報包與白名單 8B 職責：只做理解/切片/OCR/欄位化/函式呼叫，嚴禁推理與新增事實。 Function Calling → Perception Packet(JSON)：輸出 intent、entities、doc_id@span、timestamps、image{tags,bbox,ocr}、candidate_microfacts、source 等結構欄位。 工具白名單：demux_audio、stt_transcribe、ocr_image、extract_keyframes、format_transcript、normalize_units、emit_perception_packet、tts_speak。 護欄：偵測 8B 產生推理語跡→中斷並改交自研引擎；所有呼叫均寫審計（時間/工具/輸入輸出指紋/耗時）。 v18-AV-Ingest-Unified-01｜統一多模態吸收 輸入：文字、圖片、音訊（mp3/wav）、影音（mp4）。 預處理：影片→demux_audio 抽音；音訊→stt_transcribe 產 Transcript；圖片→ocr_image / extract_keyframes。 核心解構：將 Transcript／圖片理解結果／純文字一併交 8B→產 Perception Packet。 深度思考：自研引擎照「系統一( Milvus )／系統二( Neo4j )」與既定協議做溯因、多假設驗證。 渲染：結論骨架→8B 做繁中渲染（不增事實）→BreezyVoice 合成語音。 分流規則（放哪照哪套）： Facts/：影音來源最高= maybe_right；權威到位才升 ACTIVE。 Maybe_right/：候選證據；與既有事實完全相符→不增事實，掛 evidence＋alias。 Stories/：版控（revised_of），可引用不出事實。 Courses/：教材（標 L3/E2），可由你提煉。 原檔留存：原始影音預設不長留；主資產＝Transcript＋關鍵影格標註＋索引。 v18-TTS-BreezyVoice-01｜文字轉語音（TTS） 唯一 TTS：BreezyVoice（臺灣口音）。只轉聲，不改字。 串流回放：分段合成（8–12 秒片段），≤2 秒起播；支援打斷/續播。 聲音管理：5 秒樣本建 voice_id；存指紋不留原檔（除非你勾選）。 控制項：rate/pitch/volume 可調；預設自然口語。 快取：hash(text+voice_id+rate+pitch)，10GB／7 天（超額 FIFO）。 降級：TTS 故障→降為文字輸出或 OS-TTS 備援。
+
+
+採用 Whisper 當預設 STT 引擎，以「工具插槽」掛到 Llama-Breeze2-8B 的函式呼叫；8B 只做感知/調度/格式化，不做推理；BreezyVoice 單純負責 TTS。理由：準確穩定、離線可用、支援時間戳與中英/臺灣口音，在 RTX 3090 用加速版吞吐可用。
+________________
+
+
+V19-25｜v19-ASR-Whisper-01（語音轉文字 / STT）
+* 預設引擎：OpenAI Whisper（後端建議：faster-whisper / CTranslate2），GPU FP16/INT8；3090 友善。
+
+* 模型級別：預設 large-v3；壓力時自動降 medium；CPU 備援 small/base。
+
+* 語言策略：lang=auto；偵測 zh/zh-TW 時強制 --language zh，回傳語言碼。
+
+* 輸出：分段 Transcript（[t0,t1) + text），長檔分塊串流（邊轉邊出）。
+
+* 雜訊治理：啟用 VAD/靜音裁切；噪音高自動切小模型增穩。
+
+* 冪等快取：key = hash(audio_bytes)+duration；重傳不重算。
+
+* 留存策略：長留 Transcript + 指紋；原始音/視檔預設不長留（你勾選才保留）。
+
+________________
+
+
+V19-26｜v19-Perception-Packet-01（8B 情報包與白名單）
+   * 角色邊界
+
+      * 8B：讀文字、看圖/OCR、切片與欄位化、呼叫工具（ffmpeg / Whisper / BreezyVoice），嚴禁推理/新增事實。
+
+      * 自研引擎：唯一推理位（系統一/系統二）。
+
+         * 白名單函式
+ demux_audio(file)（ffmpeg 抽音, 單聲/16kHz）
+stt_transcribe(audio, model_hint)（Whisper Transcript 段列 + 時間戳）
+ocr_image(img) / extract_keyframes(video)
+ format_transcript(spans) / normalize_units(payload)
+ emit_perception_packet(json)（交回自研引擎）
+tts_speak(text, voice_id, rate?, pitch?)（BreezyVoice）
+
+         * Perception Packet（JSON）：intent, entities, media_analysis, timestamps, image{tags,bbox,ocr}, candidate_microfacts, source, meta_context。
+
+         * 護欄：偵測 8B 有「自行推理」語跡 → 立即中斷並轉交自研引擎；所有呼叫寫審計（工具/指紋/耗時）。
+
+________________
+
+
+V19-27｜v19-AV-Ingest-Unified-01（統一多模態吸收→思考→輸出）
+            1. 輸入：文字、圖片、音訊（mp3/wav）、影音（mp4）。
+
+            2. 預處理：
+
+               * 影片 → demux_audio 抽音；
+
+               * 音訊 → stt_transcribe 產 Transcript；
+
+               * 圖片 → ocr_image / extract_keyframes。
+
+                  3. 核心解構（8B）：把 Transcript / 圖像理解 / 純文字 一起丟給 8B，用 Function Calling 直接輸出結構化情報包（Perception Packet）。
+
+                  4. 深度思考（自研引擎）：Milvus（系統一）＋ Neo4j（系統二）依協議跑溯因/多假設驗證/光譜門檻。
+
+                  5. 渲染：把結論骨架交 8B 做繁中渲染（只修辭，不增新事實）→ 交 BreezyVoice 合成語音。
+
+                  6. 分流/入庫（沿用你的規則）：
+
+                     * Facts/：影音來源最高只到 maybe_right；權威證據到位→升級 ACTIVE（不重複建節點，疊索引）。
+
+                     * Maybe_right/：候選證據；若與既有事實完全相符→不增事實，掛 evidence + alias。
+
+                     * Stories/：版控，可引用不產生事實。
+
+                     * Courses/：教材（標 L3/E2），可由你提煉微事實。
+
+                     * 留存：主資產＝Transcript + 關鍵影格標註 + 索引；原始影音預設不留。
+
+                        7. 資源/佇列（3090 友善）：
+
+                           * Whisper：加速版於 3090，長檔分段流式，快取命中直回。
+
+                           * 8B：INT4/INT8 單實例；I/O 任務交 CPU；函式呼叫有超時/重試。
+
+                           * BreezyVoice：CPU，多工節流；音檔快取 10GB/7 天（超額 FIFO）。
+
+                           * 儲存：總艙上限照你 1.5TB；清理策略沿既定。
+
+________________
